@@ -1,5 +1,7 @@
 [Unit]
-Description = SNAT via ENI eth1
+Description=SNAT via ENI ens6
+Wants = network-online.target
+After = network-online.target
 
 [Service]
 ExecStart = /opt/nat/snat.sh
