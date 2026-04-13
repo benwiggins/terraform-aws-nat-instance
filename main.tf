@@ -1,12 +1,42 @@
-data "aws_ec2_instance_type" "this" {
-  for_each      = toset(var.instance_types)
-  instance_type = each.value
-}
 
 locals {
   instance_type_architectures    = { for f in var.instance_types : f => data.aws_ec2_instance_type.this[f].supported_architectures[0] }
   architectures                  = distinct([for k, v in local.instance_type_architectures : v])
   instance_type_launch_templates = { for f in var.instance_types : f => aws_launch_template.this[local.instance_type_architectures[f]].id }
+}
+
+data "aws_ec2_instance_type" "this" {
+  for_each      = toset(var.instance_types)
+  instance_type = each.value
+}
+
+data "aws_region" "current" {}
+
+data "aws_caller_identity" "current" {}
+
+# AMI of the latest Amazon Linux 2023
+data "aws_ami" "this" {
+  for_each = toset(local.architectures)
+
+  most_recent = true
+  owners      = ["amazon"]
+
+  filter {
+    name   = "architecture"
+    values = [each.value]
+  }
+  filter {
+    name   = "root-device-type"
+    values = ["ebs"]
+  }
+  filter {
+    name   = "name"
+    values = ["al2023-ami-2*"]
+  }
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
+  }
 }
 
 resource "aws_security_group" "this" {
@@ -49,30 +79,7 @@ resource "aws_route" "this" {
   network_interface_id   = aws_network_interface.this.id
 }
 
-# AMI of the latest Amazon Linux 2 
-data "aws_ami" "this" {
-  for_each = toset(local.architectures)
 
-  most_recent = true
-  owners      = ["amazon"]
-
-  filter {
-    name   = "architecture"
-    values = [each.value]
-  }
-  filter {
-    name   = "root-device-type"
-    values = ["ebs"]
-  }
-  filter {
-    name   = "name"
-    values = ["al2023-ami-2*"]
-  }
-  filter {
-    name   = "virtualization-type"
-    values = ["hvm"]
-  }
-}
 
 resource "aws_launch_template" "this" {
   for_each = toset(local.architectures)
@@ -185,21 +192,24 @@ resource "aws_iam_instance_profile" "this" {
 }
 
 resource "aws_iam_role" "this" {
-  name_prefix        = var.name
-  assume_role_policy = <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Principal": {
-        "Service": "ec2.amazonaws.com"
-      },
-      "Action": "sts:AssumeRole"
-    }
-  ]
-}
-EOF
+  name_prefix = var.name
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = data.aws_caller_identity.current.account_id
+          }
+        }
+      }
+    ]
+  })
 
   tags = local.common_tags
 }
@@ -212,19 +222,29 @@ resource "aws_iam_role_policy_attachment" "ssm" {
 resource "aws_iam_role_policy" "eni" {
   role        = aws_iam_role.this.name
   name_prefix = var.name
-  policy      = <<EOF
-{
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Effect": "Allow",
-            "Action": [
-                "ec2:AttachNetworkInterface",
-                "ec2:ModifyInstanceAttribute"
-            ],
-            "Resource": "*"
-        }
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AttachOnlyNatEni"
+        Effect = "Allow"
+        Action = [
+          "ec2:AttachNetworkInterface"
+        ]
+        Resource = [
+          aws_network_interface.this.arn,
+          "arn:aws:ec2:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:instance/*"
+        ]
+      },
+      {
+        Sid    = "ModifyInstanceAttributes"
+        Effect = "Allow"
+        Action = [
+          "ec2:ModifyInstanceAttribute"
+        ]
+        Resource = "arn:aws:ec2:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:instance/*"
+      }
     ]
-}
-EOF
+  })
 }
