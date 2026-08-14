@@ -1,0 +1,13 @@
+#!/sbin/openrc-run
+
+description="SNAT via ENI eth1"
+
+depend() {
+	need net
+}
+
+start() {
+	ebegin "Configuring SNAT"
+	/opt/nat/snat.sh
+	eend $?
+}

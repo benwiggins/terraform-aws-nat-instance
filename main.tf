@@ -3,6 +3,12 @@ locals {
   instance_type_architectures    = { for f in var.instance_types : f => data.aws_ec2_instance_type.this[f].supported_architectures[0] }
   architectures                  = distinct([for k, v in local.instance_type_architectures : v])
   instance_type_launch_templates = { for f in var.instance_types : f => aws_launch_template.this[local.instance_type_architectures[f]].id }
+
+  # Alpine's AMI names use "aarch64" rather than the "arm64" architecture value AWS uses elsewhere.
+  architecture_alpine_names = {
+    "x86_64" = "x86_64"
+    "arm64"  = "aarch64"
+  }
 }
 
 data "aws_ec2_instance_type" "this" {
@@ -14,12 +20,13 @@ data "aws_region" "current" {}
 
 data "aws_caller_identity" "current" {}
 
-# AMI of the latest Amazon Linux 2023
+# AMI of the latest Alpine Linux cloud-init image
+# https://gitlab.alpinelinux.org/alpine/cloud/alpine-cloud-images
 data "aws_ami" "this" {
   for_each = toset(local.architectures)
 
   most_recent = true
-  owners      = ["amazon"]
+  owners      = ["538276064493"] # Alpine Linux
 
   filter {
     name   = "architecture"
@@ -31,7 +38,7 @@ data "aws_ami" "this" {
   }
   filter {
     name   = "name"
-    values = ["al2023-ami-2*"]
+    values = ["alpine-3.*-${local.architecture_alpine_names[each.value]}-uefi-cloudinit-r*"]
   }
   filter {
     name   = "virtualization-type"
@@ -126,8 +133,9 @@ resource "aws_launch_template" "this" {
           permissions : "0755",
         },
         {
-          path : "/etc/systemd/system/snat.service",
-          content : file("${path.module}/snat.service"),
+          path : "/etc/init.d/snat",
+          content : file("${path.module}/snat.initd"),
+          permissions : "0755",
         },
       ], var.user_data_write_files),
       runcmd : concat([

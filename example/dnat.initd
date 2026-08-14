@@ -1,0 +1,12 @@
+#!/sbin/openrc-run
+
+description="DNAT via ENI eth1"
+
+supervisor=supervise-daemon
+command="/opt/nat/dnat.sh"
+pidfile="/run/${RC_SVCNAME}.pid"
+
+depend() {
+	need net
+	after snat
+}

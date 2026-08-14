@@ -30,14 +30,15 @@ module "nat" {
       permissions : "0755",
     },
     {
-      path : "/etc/systemd/system/dnat.service",
-      content : file("./dnat.service"),
+      path : "/etc/init.d/dnat",
+      content : file("./dnat.initd"),
+      permissions : "0755",
     },
   ]
   user_data_runcmd = [
-    ["yum", "install", "-y", "jq"],
-    ["systemctl", "enable", "dnat"],
-    ["systemctl", "start", "dnat"],
+    ["apk", "add", "--no-cache", "jq"],
+    ["rc-update", "add", "dnat", "default"],
+    ["rc-service", "dnat", "start"],
   ]
 }
 

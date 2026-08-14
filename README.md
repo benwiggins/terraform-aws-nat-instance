@@ -73,7 +73,7 @@ Take a look at the diagram:
 
 ![diagram](diagram.svg)
 
-By default the latest Amazon Linux 2 image is used.
+By default the latest Alpine Linux cloud-init image is used.
 You can set `image_id` for a custom image.
 
 The instance will execute [`runonce.sh`](runonce.sh) and [`snat.sh`](snat.sh) to enable NAT as follows:
@@ -81,6 +81,11 @@ The instance will execute [`runonce.sh`](runonce.sh) and [`snat.sh`](snat.sh) to
 1. Attach the ENI to `eth1`.
 1. Set the kernel parameters for IP forwarding and masquerade.
 1. Switch the default route to `eth1`.
+
+Alpine uses OpenRC rather than systemd, so `snat.sh` is wired up as an OpenRC service
+([`snat.initd`](snat.initd), installed to `/etc/init.d/snat`) instead of a systemd unit.
+If you're using `user_data_write_files`/`user_data_runcmd` to add your own services (as in the
+[example](example/)'s optional port-forwarding snippet), they should be OpenRC init scripts too.
 
 
 ## Configuration

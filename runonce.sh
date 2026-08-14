@@ -1,7 +1,19 @@
-#!/bin/bash -x
+#!/bin/sh -x
+
+apk update && apk upgrade --no-cache
+apk add --no-cache bash curl aws-cli iptables amazon-ssm-agent amazon-ssm-agent-openrc
+
+rc-update add amazon-ssm-agent default
+rc-service amazon-ssm-agent start
+
+TOKEN="$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")"
+imds() { curl -s -H "X-aws-ec2-metadata-token: $TOKEN" "http://169.254.169.254/latest/meta-data/$1"; }
+
+INSTANCE_ID="$(imds instance-id)"
+REGION="$(imds placement/availability-zone | sed 's/.$//')"
 
 # Disable Source/Destination Check for the instance default interface
-aws ec2 modify-instance-attribute --instance-id "$(/usr/bin/ec2-metadata -i | cut -d' ' -f2)" --no-source-dest-check
+aws ec2 modify-instance-attribute --region "$REGION" --instance-id "$INSTANCE_ID" --no-source-dest-check
 
 # try to attach the ENI
 max_attempts=10
@@ -9,8 +21,8 @@ attempt=0
 
 while true; do
     aws ec2 attach-network-interface \
-        --region "$(/usr/bin/ec2-metadata -z | sed 's/placement: \(.*\).$/\1/')" \
-        --instance-id "$(/usr/bin/ec2-metadata -i | cut -d' ' -f2)" \
+        --region "$REGION" \
+        --instance-id "$INSTANCE_ID" \
         --device-index 1 \
         --network-interface-id "${eni_id}" && break
 
@@ -18,7 +30,7 @@ while true; do
 
     if [ "$attempt" -ge "$max_attempts" ]; then
         echo "Maximum attempts reached. Initiating reboot."
-        sudo reboot
+        reboot
         break
     fi
 
@@ -26,11 +38,6 @@ while true; do
     sleep 5 # waits for 5 seconds before retrying
 done
 
-# Install IP tables its not available by default on Amazon Linux 2023 anymore
-sudo yum install -y iptables-services
-sudo systemctl enable iptables
-sudo systemctl start iptables
-
 # start SNAT
-systemctl enable snat
-systemctl start snat
+rc-update add snat default
+rc-service snat start
